@@ -6,6 +6,10 @@
 .pnp.js
 .yarn/install-state.gz
 
+
+# Claude Code session data and configs
+.claude/
+
 # testing
 /coverage
 
