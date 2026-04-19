@@ -71,7 +71,6 @@ export function bodyCardsPrompt(
   keyPoints: string[],
   thumbnailLines: string[]
 ): string {
-  const ctaAccount = process.env.CTA_ACCOUNT ?? '@account';
   return `당신은 인스타그램 카드뉴스 본문 작성자입니다.
 
 주제: ${topic}
@@ -90,7 +89,7 @@ JSON만 출력:
   "card_02": {"subtitle": "소제목", "body": "본문 텍스트"},
   "card_03": {"subtitle": "소제목", "body": "본문 텍스트"},
   "card_04": {"subtitle": "소제목", "body": "본문 텍스트"},
-  "card_05": {"cta_main": "지금 팔로우하세요", "cta_sub": "더 많은 콘텐츠를 만나보세요", "account": "${ctaAccount}"}
+  "card_05": {"cta_main": "지금 팔로우하세요", "cta_sub": "더 많은 콘텐츠를 만나보세요"}
 }`;
 }
 

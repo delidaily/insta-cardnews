@@ -89,7 +89,12 @@ export default function SettingsPage() {
               <select
                 className="w-full bg-gray-800 border border-gray-700 rounded-lg px-4 py-2 text-sm focus:outline-none focus:border-blue-500"
                 value={model}
-                onChange={(e) => setModel(e.target.value)}
+                onChange={(e) => {
+                  setModel(e.target.value);
+                  localStorage.setItem('ollama_model', e.target.value);
+                  setSaved(true);
+                  setTimeout(() => setSaved(false), 1500);
+                }}
               >
                 <option value="">-- 모델 선택 --</option>
                 {models.map((m) => (

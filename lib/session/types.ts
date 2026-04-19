@@ -29,15 +29,24 @@ export interface BodyCardsJson {
   card_02: { subtitle: string; body: string };
   card_03: { subtitle: string; body: string };
   card_04: { subtitle: string; body: string };
-  card_05: { cta_main: string; cta_sub: string; account: string };
+  card_05: { cta_main: string; cta_sub: string; account?: string };
 }
 
 export type ImageSource = 'user_upload' | 'none' | 'color';
+
+export interface GradientConfig {
+  direction: string;
+  color_start: string;
+  color_end: string;
+  opacity_start: number;
+  opacity_end: number;
+}
 
 export interface ImageCard {
   source: ImageSource;
   selected: string | null;
   color?: string;
+  gradient?: GradientConfig;
 }
 
 export interface ImagesJson {
@@ -47,6 +56,34 @@ export interface ImagesJson {
   card_03: ImageCard;
   card_04: ImageCard;
   card_05: ImageCard;
+}
+
+// ── Editor types ──────────────────────────────────────────────────────────
+
+export interface ElementOverride {
+  offsetX: number
+  offsetY: number
+  fontSize?: number
+  color?: string
+  visible: boolean
+}
+
+export interface CardEditorData {
+  elements: Record<string, ElementOverride>
+  bgPosition: { x: number; y: number }
+}
+
+export interface EditorState {
+  card_01: CardEditorData
+  card_02: CardEditorData
+  card_03: CardEditorData
+  card_04: CardEditorData
+  card_05: CardEditorData
+}
+
+export interface EditorContentOverride {
+  lines?: [string, string, string]
+  body?: BodyCardsJson
 }
 
 export interface SessionResult {

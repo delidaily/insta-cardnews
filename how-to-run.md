@@ -1,5 +1,4 @@
-cd cardnews-agent && npm run dev
-(D:\project\AI\instar-cardnews\cardnews-agent)
+npm run dev
 /settings에서 Ollama 호스트 설정 및 모델 선택
 /studio에서 주제 입력 후 생성
 주의: public/fonts/에 Pretendard woff2 파일을 추가해야 한글이 올바르게 렌더링됩니다. Pretendard 릴리즈에서 Pretendard-Regular.woff2, Pretendard-Bold.woff2, Pretendard-SemiBold.woff2를 다운로드하세요.

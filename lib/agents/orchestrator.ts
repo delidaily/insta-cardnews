@@ -30,10 +30,31 @@ export type AgentEvent =
   | { type: 'error'; message: string; retryable: boolean }
   | { type: 'done'; step: StepNumber };
 
+function extractFirstJson(text: string): string {
+  const start = text.indexOf('{');
+  if (start === -1) throw new Error('JSON not found in response');
+  let depth = 0;
+  let inString = false;
+  let escape = false;
+  for (let i = start; i < text.length; i++) {
+    const ch = text[i];
+    if (escape) { escape = false; continue; }
+    if (ch === '\\' && inString) { escape = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === '{') depth++;
+    else if (ch === '}') { depth--; if (depth === 0) return text.slice(start, i + 1); }
+  }
+  throw new Error('JSON brace not closed in response');
+}
+
 async function parseJson<T>(raw: string): Promise<T> {
-  const match = raw.match(/\{[\s\S]*\}/);
-  if (!match) throw new Error('JSON not found in response');
-  return JSON.parse(match[0]) as T;
+  const stripped = raw.replace(/```(?:json)?\n?([\s\S]*?)```/g, '$1').trim();
+  try {
+    return JSON.parse(extractFirstJson(stripped)) as T;
+  } catch (e) {
+    throw new Error(`JSON 파싱 실패: ${e} | 원문 앞부분: ${raw.slice(0, 200)}`);
+  }
 }
 
 async function chatWithRetry(
@@ -171,6 +192,7 @@ export async function runStep4(
       `본문 생성 ${attempt}회차`
     );
     const body = await parseJson<BodyCardsJson>(raw);
+    body.card_05.account = process.env.CTA_ACCOUNT ?? body.card_05.account;
 
     // 비평 에이전트 — 톤 일관성
     const criticRaw = await chatWithRetry(

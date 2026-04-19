@@ -3,6 +3,8 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { Suspense } from 'react';
+import { CardEditorPanel, defaultEditorState } from '@/components/card-editor';
+import type { EditorState } from '@/lib/session/types';
 
 const TONE_OPTIONS = [
   { value: 'professional', label: '전문가적' },
@@ -22,10 +24,71 @@ const PRESET_OPTIONS = [
 const CARD_KEYS = ['card_01', 'card_02', 'card_03', 'card_04', 'card_05'] as const;
 type CardKey = typeof CARD_KEYS[number];
 
+interface GradientConfig { direction: string; color_start: string; color_end: string; opacity_start: number; opacity_end: number; }
 interface ThumbnailCopy { lines: [string, string, string]; critic_score: number; attempts: number; escalated?: boolean; }
 interface BodyCard { subtitle: string; body: string; }
 interface BodyCards { card_02: BodyCard; card_03: BodyCard; card_04: BodyCard; card_05: { cta_main: string; cta_sub: string; account: string }; }
-type Phase = 'input' | 'processing' | 'approve-thumbnail' | 'approve-body' | 'image-select' | 'rendering' | 'done' | 'error';
+type Phase = 'input' | 'processing' | 'approve-thumbnail' | 'approve-body' | 'image-select' | 'editor' | 'rendering' | 'done' | 'error';
+
+const DIRECTIONS = [
+  { label: '↓', value: 'to bottom' }, { label: '↑', value: 'to top' },
+  { label: '→', value: 'to right' }, { label: '←', value: 'to left' },
+  { label: '↘', value: '135deg' }, { label: '↗', value: '45deg' },
+];
+
+function hexWithOpacity(hex: string, opacity: number): string {
+  const h = hex.replace('#', '').padEnd(6, '0');
+  return `rgba(${parseInt(h.slice(0,2),16)},${parseInt(h.slice(2,4),16)},${parseInt(h.slice(4,6),16)},${opacity})`;
+}
+
+function defaultGradient(preset: string, cardKey: CardKey): GradientConfig {
+  if (preset === 'preset-B') {
+    const isBody = cardKey !== 'card_01' && cardKey !== 'card_05';
+    return { direction: 'to right', color_start: '#ffffff', color_end: '#ffffff', opacity_start: isBody ? 0.15 : 0.92, opacity_end: isBody ? 0.05 : 0.30 };
+  }
+  if (preset === 'preset-C') {
+    return { direction: '135deg', color_start: '#6C3FC5', color_end: '#C53F9C', opacity_start: 0.85, opacity_end: 0.85 };
+  }
+  const isThumb = cardKey === 'card_01';
+  const isCta = cardKey === 'card_05';
+  return { direction: 'to bottom', color_start: '#000000', color_end: '#000000', opacity_start: isThumb ? 0.15 : isCta ? 0.30 : 0.55, opacity_end: isThumb ? 0.72 : isCta ? 0.75 : 0.82 };
+}
+
+function makeDefaultGradientMap(preset: string): Record<CardKey, GradientConfig> {
+  return Object.fromEntries(CARD_KEYS.map((k) => [k, defaultGradient(preset, k)])) as Record<CardKey, GradientConfig>;
+}
+
+function GradientEditor({ config, onChange }: { config: GradientConfig; onChange: (c: GradientConfig) => void }) {
+  const previewBg = `linear-gradient(${config.direction}, ${hexWithOpacity(config.color_start, config.opacity_start)} 0%, ${hexWithOpacity(config.color_end, config.opacity_end)} 100%)`;
+  return (
+    <div className="mt-3 p-3 bg-gray-800 rounded-lg space-y-3 text-xs">
+      <div className="flex items-center justify-between">
+        <span className="text-gray-400">그라디언트 오버레이</span>
+        <div className="h-5 w-28 rounded" style={{ background: previewBg }} />
+      </div>
+      <div className="flex gap-1">
+        {DIRECTIONS.map((d) => (
+          <button key={d.value} onClick={() => onChange({ ...config, direction: d.value })}
+            className={`flex-1 py-1 rounded font-bold transition-colors ${config.direction === d.value ? 'bg-blue-600 text-white' : 'bg-gray-700 text-gray-300 hover:bg-gray-600'}`}>
+            {d.label}
+          </button>
+        ))}
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-gray-400 w-6">시작</span>
+        <input type="color" value={config.color_start} onChange={(e) => onChange({ ...config, color_start: e.target.value })} className="w-7 h-6 rounded cursor-pointer bg-transparent border-0 p-0" />
+        <input type="range" min="0" max="1" step="0.05" value={config.opacity_start} onChange={(e) => onChange({ ...config, opacity_start: parseFloat(e.target.value) })} className="flex-1 accent-blue-500" />
+        <span className="text-gray-400 w-8 text-right">{Math.round(config.opacity_start * 100)}%</span>
+      </div>
+      <div className="flex items-center gap-2">
+        <span className="text-gray-400 w-6">끝</span>
+        <input type="color" value={config.color_end} onChange={(e) => onChange({ ...config, color_end: e.target.value })} className="w-7 h-6 rounded cursor-pointer bg-transparent border-0 p-0" />
+        <input type="range" min="0" max="1" step="0.05" value={config.opacity_end} onChange={(e) => onChange({ ...config, opacity_end: parseFloat(e.target.value) })} className="flex-1 accent-blue-500" />
+        <span className="text-gray-400 w-8 text-right">{Math.round(config.opacity_end * 100)}%</span>
+      </div>
+    </div>
+  );
+}
 
 function StudioContent() {
   const searchParams = useSearchParams();
@@ -43,12 +106,14 @@ function StudioContent() {
   const [bodyCards, setBodyCards] = useState<BodyCards | null>(null);
   const [editedBody, setEditedBody] = useState<BodyCards | null>(null);
   const [preset, setPreset] = useState('preset-A');
+  const [gradientMap, setGradientMap] = useState<Record<CardKey, GradientConfig>>(() => makeDefaultGradientMap('preset-A'));
   const [imageMap, setImageMap] = useState<Record<CardKey, { source: 'user_upload' | 'none' | 'color'; file?: File; preview?: string; color?: string }>>({
     card_01: { source: 'none' }, card_02: { source: 'none' }, card_03: { source: 'none' }, card_04: { source: 'none' }, card_05: { source: 'color', color: '#1A1A2E' },
   });
   const [outputFiles, setOutputFiles] = useState<string[]>([]);
+  const [editorState, setEditorState] = useState<EditorState>(() => defaultEditorState());
   const [error, setError] = useState('');
-  const [model, setModel] = useState('');
+  const [model, setModel] = useState<string | null>(null);
   const logsEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => { setModel(localStorage.getItem('ollama_model') ?? ''); }, []);
@@ -58,6 +123,7 @@ function StudioContent() {
 
   async function startGeneration() {
     if (!model) { setError('설정 페이지에서 Ollama 모델을 먼저 선택하세요.'); return; }
+
     if (!topic.trim()) { setError('주제를 입력하세요.'); return; }
     setError(''); setLogs([]); setPhase('processing');
 
@@ -161,33 +227,65 @@ function StudioContent() {
     }
   }
 
-  async function startRendering() {
-    setPhase('rendering');
-    // Save images.json
-    const imagesPayload = {
+  function buildImagesPayload() {
+    return {
       preset,
       ...Object.fromEntries(
         CARD_KEYS.map((k) => {
           const v = imageMap[k];
-          return [k, { source: v.source, selected: (v as { selected?: string }).selected ?? null, color: v.color }];
+          return [k, { source: v.source, selected: (v as { selected?: string }).selected ?? null, color: v.color, gradient: gradientMap[k] }];
         })
       ),
     };
+  }
+
+  async function startRendering(
+    finalEditorState?: EditorState,
+    finalLines?: [string, string, string],
+    finalBody?: BodyCards,
+  ) {
+    setPhase('rendering');
+    const imagesPayload = buildImagesPayload();
     await fetch('/api/approve', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ sessionId, step: 6, action: 'approve', data: imagesPayload }),
     });
 
-    // Write images.json directly via a convenience endpoint
     const renderRes = await fetch('/api/render', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ sessionId, images: imagesPayload }),
+      body: JSON.stringify({
+        sessionId,
+        images: imagesPayload,
+        overrides: finalEditorState ?? editorState,
+        content: finalLines && finalBody ? { lines: finalLines, body: finalBody } : undefined,
+      }),
     });
     const result = await renderRes.json();
     if (result.ok) { setOutputFiles(result.outputFiles); setPhase('done'); }
     else { setError(result.errors?.join('\n') ?? '렌더링 실패'); setPhase('error'); }
+  }
+
+  // ── Editor phase: full-screen takeover ──────────────────────────────────
+  if (phase === 'editor' && editedBody) {
+    return (
+      <CardEditorPanel
+        preset={preset}
+        initialLines={editedLines}
+        initialBody={editedBody}
+        imageMap={imageMap}
+        gradientMap={gradientMap}
+        onGradientChange={(key, g) => setGradientMap((prev) => ({ ...prev, [key]: g }))}
+        onSaveRender={(state, finalLines, finalBody) => {
+          setEditorState(state);
+          setEditedLines(finalLines);
+          setEditedBody(finalBody);
+          startRendering(state, finalLines, finalBody);
+        }}
+        onBack={() => setPhase('image-select')}
+      />
+    );
   }
 
   return (
@@ -200,9 +298,9 @@ function StudioContent() {
 
       {/* Step indicator */}
       <div className="px-6 py-4 border-b border-gray-800">
-        <div className="flex gap-2 text-xs">
-          {['입력', '처리중', '썸네일 승인', '본문 승인', '이미지 선택', '렌더링', '완료'].map((label, i) => {
-            const stepPhases: Phase[] = ['input', 'processing', 'approve-thumbnail', 'approve-body', 'image-select', 'rendering', 'done'];
+        <div className="flex gap-2 text-xs flex-wrap">
+          {['입력', '처리중', '썸네일 승인', '본문 승인', '이미지 선택', '카드 편집', '렌더링', '완료'].map((label, i) => {
+            const stepPhases: Phase[] = ['input', 'processing', 'approve-thumbnail', 'approve-body', 'image-select', 'editor', 'rendering', 'done'];
             const active = phase === stepPhases[i];
             const done = stepPhases.indexOf(phase) > i;
             return (
@@ -217,15 +315,21 @@ function StudioContent() {
       <main className="max-w-3xl mx-auto px-6 py-8">
         {error && (
           <div className="mb-6 p-4 bg-red-900/40 border border-red-700 rounded-xl text-red-300 text-sm">
-            {model ? '' : '⚠️ '}
+            {model === '' ? '⚠️ ' : ''}
             {error}
-            {!model && <a href="/settings" className="ml-2 underline">설정 페이지로 이동 →</a>}
+            {model === '' && <a href="/settings" className="ml-2 underline">설정 페이지로 이동 →</a>}
           </div>
         )}
 
         {/* Phase: Input */}
         {phase === 'input' && (
           <div className="space-y-6">
+            {model !== null && !model && (
+              <div className="p-4 bg-yellow-900/40 border border-yellow-700 rounded-xl text-yellow-300 text-sm flex items-center justify-between">
+                <span>⚠️ AI 모델이 선택되지 않았습니다. 생성을 시작하려면 먼저 모델을 선택하세요.</span>
+                <a href="/settings" className="ml-4 shrink-0 bg-yellow-700 hover:bg-yellow-600 text-white px-3 py-1 rounded-lg text-xs font-medium">설정 →</a>
+              </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-gray-300 mb-2">카드뉴스 주제 및 내용</label>
               <textarea
@@ -251,10 +355,11 @@ function StudioContent() {
             </div>
             <button
               onClick={startGeneration}
-              disabled={!topic.trim()}
+              disabled={!topic.trim() || model === '' || model === null}
+              title={model === '' ? 'AI 모델을 먼저 설정 페이지에서 선택하세요' : ''}
               className="w-full bg-blue-600 hover:bg-blue-500 disabled:bg-gray-800 disabled:text-gray-600 text-white py-3 rounded-xl font-semibold text-base transition-colors"
             >
-              카드뉴스 생성 시작
+              {model === '' ? '모델 미선택 — 설정에서 모델을 선택하세요' : '카드뉴스 생성 시작'}
             </button>
           </div>
         )}
@@ -358,7 +463,7 @@ function StudioContent() {
               <h2 className="font-semibold mb-3">템플릿 선택</h2>
               <div className="grid grid-cols-3 gap-3">
                 {PRESET_OPTIONS.map((p) => (
-                  <button key={p.value} onClick={() => setPreset(p.value)} className={`p-4 rounded-xl border-2 text-left transition-colors ${preset === p.value ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700 bg-gray-900 hover:border-gray-500'}`}>
+                  <button key={p.value} onClick={() => { setPreset(p.value); setGradientMap(makeDefaultGradientMap(p.value)); }} className={`p-4 rounded-xl border-2 text-left transition-colors ${preset === p.value ? 'border-blue-500 bg-blue-900/20' : 'border-gray-700 bg-gray-900 hover:border-gray-500'}`}>
                     <div className="font-bold text-base mb-1">{p.label}</div>
                     <div className="text-xs text-gray-400">{p.desc}</div>
                   </button>
@@ -371,31 +476,37 @@ function StudioContent() {
                 {CARD_KEYS.map((cardKey) => {
                   const v = imageMap[cardKey];
                   return (
-                    <div key={cardKey} className="bg-gray-900 rounded-xl p-4 flex items-center gap-4">
-                      <div className="text-sm font-medium w-20 text-gray-400">{cardKey.replace('_', ' ').toUpperCase()}</div>
-                      {v.preview && <img src={v.preview} alt="" className="w-16 h-16 rounded-lg object-cover" />}
-                      <div className="flex gap-2 flex-1">
-                        <label className="flex-1 bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700 text-blue-300 text-xs py-2 px-3 rounded-lg cursor-pointer text-center">
-                          이미지 업로드
-                          <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleImageUpload(cardKey, e.target.files[0]); }} />
-                        </label>
-                        {cardKey === 'card_05' && (
-                          <div className="flex items-center gap-2">
-                            <input type="color" value={v.color ?? '#1A1A2E'} onChange={(e) => setImageMap((p) => ({ ...p, [cardKey]: { source: 'color', color: e.target.value } }))} className="w-10 h-9 rounded cursor-pointer bg-transparent border-0" />
-                            <span className="text-xs text-gray-400">색상 선택</span>
-                          </div>
-                        )}
-                        {v.source !== 'none' && v.source !== 'color' && (
-                          <button onClick={() => setImageMap((p) => ({ ...p, [cardKey]: { source: 'none' } }))} className="text-xs text-gray-500 hover:text-red-400">제거</button>
-                        )}
+                    <div key={cardKey} className="bg-gray-900 rounded-xl p-4">
+                      <div className="flex items-center gap-4">
+                        <div className="text-sm font-medium w-20 text-gray-400 shrink-0">{cardKey.replace('_', ' ').toUpperCase()}</div>
+                        {v.preview && <img src={v.preview} alt="" className="w-16 h-16 rounded-lg object-cover shrink-0" />}
+                        <div className="flex gap-2 flex-1 min-w-0">
+                          <label className="flex-1 bg-blue-900/30 hover:bg-blue-900/50 border border-blue-700 text-blue-300 text-xs py-2 px-3 rounded-lg cursor-pointer text-center">
+                            이미지 업로드
+                            <input type="file" accept="image/*" className="hidden" onChange={(e) => { if (e.target.files?.[0]) handleImageUpload(cardKey, e.target.files[0]); }} />
+                          </label>
+                          {cardKey === 'card_05' && (
+                            <div className="flex items-center gap-2">
+                              <input type="color" value={v.color ?? '#1A1A2E'} onChange={(e) => setImageMap((p) => ({ ...p, [cardKey]: { source: 'color', color: e.target.value } }))} className="w-10 h-9 rounded cursor-pointer bg-transparent border-0" />
+                              <span className="text-xs text-gray-400">색상</span>
+                            </div>
+                          )}
+                          {v.source !== 'none' && v.source !== 'color' && (
+                            <button onClick={() => setImageMap((p) => ({ ...p, [cardKey]: { source: 'none' } }))} className="text-xs text-gray-500 hover:text-red-400 shrink-0">제거</button>
+                          )}
+                        </div>
                       </div>
+                      <GradientEditor
+                        config={gradientMap[cardKey]}
+                        onChange={(c) => setGradientMap((prev) => ({ ...prev, [cardKey]: c }))}
+                      />
                     </div>
                   );
                 })}
               </div>
             </div>
-            <button onClick={startRendering} className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl font-semibold text-base">
-              카드뉴스 렌더링 시작
+            <button onClick={() => setPhase('editor')} className="w-full bg-green-600 hover:bg-green-500 text-white py-3 rounded-xl font-semibold text-base">
+              카드 편집기 열기
             </button>
           </div>
         )}
